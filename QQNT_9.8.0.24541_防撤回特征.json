@@ -1,0 +1,42 @@
+{
+  "说明": "RevokeMsgPatcher QQNT 新特征（wrapper.node 9.8.0.24541 / QQ 9.9.36-53644）",
+  "适用版本": {
+    "QQ": "9.9.36-53644",
+    "wrapper.node": "9.8.0.24541",
+    "验证日期": "2026-10-11",
+    "验证方式": "字节级验证（4 处 0F 87 -> 0F 86），QQ 启动正常（10 进程无崩溃）"
+  },
+  "背景": "官方内置特征(20250803)与 GitHub master(20260816)最高仅支持 wrapper.node 9.8.0.19307；9.8.0.24541 中官方特征 Search 模式 0 匹配（代码结构已变），且天然存在一段完整 Replace 模式导致工具误判'已安装'并禁用安装按钮。手动定位 4 处撤回消息长度检查分支（HandleRecallSysMsg kBytesMsgContent 同构代码）完成补丁。",
+  "PatchJson增量": {
+    "App": "QQNT",
+    "FileCommonModifyInfos": {
+      "wrapper.node": [
+        {
+          "Name": "wrapper.node",
+          "StartVersion": "9.8.0.24541",
+          "EndVersion": "",
+          "ReplacePatterns": [
+            {
+              "Search": [76,137,192,72,41,208,72,131,248,7,15,135],
+              "Replace": [76,137,192,72,41,208,72,131,248,7,15,134],
+              "Category": "防撤回",
+              "Tips": "wrapper.node 9.8.0.24541 (QQ 9.9.36)：4 处 HandleRecallSysMsg kBytesMsgContent 长度分支（0F 87/0F 86），手动特征；官方 9.8.0.19306 特征在此版本 0 匹配"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "字节模式": {
+    "Search_hex": "4C 89 C0 48 29 D0 48 83 F8 07 0F 87",
+    "Replace_hex": "4C 89 C0 48 29 D0 48 83 F8 07 0F 86",
+    "匹配数量": 4,
+    "匹配偏移": ["0x138B77B", "0x13B48DA", "0x179B793", "0x274BE03"],
+    "修改位置": ["0x138B783", "0x13B48E2", "0x179B79B", "0x274BE0B"]
+  },
+  "注意事项": [
+    "QQ 自动更新会覆盖 wrapper.node，补丁失效后需重新安装",
+    "防撤回工具存在封号/警告风险（官方 2.1 说明），使用后果自负",
+    "分享时请保留本文件说明，便于他人验证"
+  ]
+}
