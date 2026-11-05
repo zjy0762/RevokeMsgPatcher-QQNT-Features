@@ -18,14 +18,15 @@ PC 微信 / QQNT（QQ 新版）防撤回补丁特征与一键脚本。
 ```
 py -3.14 patch_qqnt_antirevoke.py        # 只检查当前状态
 py -3.14 patch_qqnt_antirevoke.py apply  # 打补丁（需先退出 QQ）
+py -3.14 patch_qqnt_antirevoke.py apply "D:\Tencent\QQNT"  # 手动指定安装目录或 wrapper.node 路径
 ```
 
-脚本自动备份为 `wrapper.node.antirevoke_full.bak`，可随时还原。幂等安全（已打过的会跳过）。
+不指定路径时自动查找安装目录（注册表 + 常见目录）。脚本自动备份为 `wrapper.node.antirevoke_full.bak`，可随时还原。幂等安全（已打过的会跳过）。
 
 ## 覆盖的撤回路径
 
 ### 群聊撤回（HandleRecallSysMsg）
-搜索 4 处特征头 `4C 89 C0 48 29 D0 48 83 F8 07 0F 87`，尾字节 `0F 87 → 0F 86`。
+特征头 `4C 89 C0 48 29 D0 48 83 F8 07 0F 87` 全文件匹配 5 处，其中 4 处为撤回路径，按固定偏移修改尾字节 `0F 87 → 0F 86`（`0x138B783` / `0x13B48E2` / `0x179B79B` / `0x274BE0B`），第 5 处（特征头 `0x274AACE`）不动。
 语义：长消息(>7B)撤回时跳过替换，消息内容保留。
 
 ### 私聊(c2c)撤回（本仓库逆向新增）
@@ -62,7 +63,7 @@ py -3.14 patch_qqnt_antirevoke.py
 
 | 文件 | 说明 |
 |---|---|
-| `patch_qqnt_antirevoke.py` | 一键补丁脚本（需要 Python 3.14 / capstone 环境，`py -3.14`） |
+| `patch_qqnt_antirevoke.py` | 一键补丁脚本（Python 3，无第三方依赖） |
 | `QQNT_9.8.0.24541_防撤回特征.json` | 特征数据 |
 
 ## 致谢

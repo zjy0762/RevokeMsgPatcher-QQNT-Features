@@ -1,29 +1,50 @@
 # -*- coding: utf-8 -*-
 # QQNT 9.9.36-53644 (wrapper.node 9.8.0.24541) 防撤回完整补丁集
 # 覆盖：群聊撤回(F1) + 拍一拍撤回(F5) + 私聊(c2c)撤回全部路径
-# 用法: py -3.14 patch_qqnt_antirevoke.py [apply]
-# 不带 apply = 只检查当前状态
+# 用法: py -3.14 patch_qqnt_antirevoke.py [apply] [wrapper.node 路径或 QQNT 安装目录]
+# 不带 apply = 只检查当前状态；不带路径 = 自动查找（注册表 + 常见目录）
 import sys, os, shutil
 
-PATH = r"D:\Program Files\Tencent\QQNT\versions\9.9.36-53644\resources\app\wrapper.node"
+VERSION = "9.9.36-53644"
+REL = os.path.join("versions", VERSION, "resources", "app", "wrapper.node")
+DEFAULT_DIRS = [
+    r"C:\Program Files\Tencent\QQNT",
+    r"C:\Program Files (x86)\Tencent\QQNT",
+    r"D:\Program Files\Tencent\QQNT",
+    r"D:\Tencent\QQNT",
+]
 
-# (offset, 旧字节, 新字节, 描述)
-# F1 群聊: HandleRecallSysMsg 长消息跳过替换 (4处, 搜索头改尾字节)
+def registry_dir():
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for key in (r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as k:
+                icon = winreg.QueryValueEx(k, "DisplayIcon")[0]  # 形如 D:\Tencent\QQNT\QQ.exe,0
+                return os.path.dirname(icon.split(",")[0].strip('"'))
+        except OSError:
+            pass
+    return None
+
+def resolve_path(arg):
+    if arg:
+        return arg if arg.lower().endswith(".node") else os.path.join(arg, REL)
+    for d in [registry_dir()] + DEFAULT_DIRS:
+        if d and os.path.exists(os.path.join(d, REL)):
+            return os.path.join(d, REL)
+    return None
+
+# F1 群聊: HandleRecallSysMsg 长消息跳过替换。特征头全文件匹配 5 处，仅其中 4 处是撤回路径，
+# 故按固定偏移打补丁（偏移 = 特征头起点，尾字节 0F 87 -> 0F 86 位于 +11）
 F1_HEAD = bytes.fromhex("4C 89 C0 48 29 D0 48 83 F8 07 0F 87")
 F1_HEAD_NEW = bytes.fromhex("4C 89 C0 48 29 D0 48 83 F8 07 0F 86")
+F1_OFFS = [0x138B778, 0x13B48D7, 0x179B790, 0x274BE00]
 
-def find_f1(data):
-    hits = []
-    idx = 0
-    while True:
-        i = data.find(F1_HEAD, idx)
-        if i < 0:
-            break
-        hits.append(i + 8)  # 尾字节 0F 87 的偏移 = 头偏移+8
-        idx = i + 1
-    return hits
-
-PATCHES = [
+# (offset, 旧字节, 新字节, 描述)
+PATCHES = [(off, F1_HEAD, F1_HEAD_NEW, "F1 群聊撤回 0x%X" % (off + 11)) for off in F1_OFFS] + [
     # F5 拍一拍撤回
     (0x154E9C6, b"\xE8\xFB\x34\xFE\xFF", b"\x90"*5, "F5 拍一拍撤回 NOP"),
     # 私聊(c2c)撤回：4个解析变体入口直接返回false
@@ -41,23 +62,26 @@ PATCHES = [
 ]
 
 def main():
-    data = open(PATH, "rb").read()
+    args = sys.argv[1:]
+    apply = bool(args) and args[0].lower() == "apply"
+    if apply:
+        args = args[1:]
+    PATH = resolve_path(args[0] if args else None)
+
     lines = []
     def W(s):
         lines.append(str(s))
         print(s)
+    def done(code):
+        open(os.path.join(os.environ["TEMP"], "patch_qqnt_result.txt"), "w", encoding="utf-8").write("\n".join(lines))
+        sys.exit(code)
 
-    W("=== QQNT 防撤回补丁 (file size=%d) ===" % len(data))
+    if not PATH or not os.path.exists(PATH):
+        W("ERROR: 未找到 QQNT %s 的 wrapper.node%s，请把路径作为参数传入" % (VERSION, " (%s)" % PATH if PATH else ""))
+        done(1)
 
-    # F1 检查/应用
-    f1_offs = find_f1(data)
-    W("F1 群聊补丁: 匹配头=%d 处" % len(f1_offs))
-    if not f1_offs:
-        W("  [警告] F1 搜索头未匹配，可能已是补丁态(0F 86)或版本不符")
-        f1_done = data.count(F1_HEAD_NEW) >= 4
-        W("  F1 是否已打(0F 86 计数=%d): %s" % (data.count(F1_HEAD_NEW), f1_done))
-    else:
-        f1_done = False
+    data = open(PATH, "rb").read()
+    W("=== QQNT 防撤回补丁 %s (file size=%d) ===" % (PATH, len(data)))
 
     issues = 0
     for off, old, new, desc in PATCHES:
@@ -70,27 +94,15 @@ def main():
             W("0x%X [%s] MISMATCH! cur=%s" % (off, desc, cur.hex(" ").upper()))
             issues += 1
 
-    apply = len(sys.argv) > 1 and sys.argv[1].lower() == "apply"
     if not apply:
         W("[DRY-RUN] 未写入。加 apply 执行。")
-        open(os.path.join(os.environ["TEMP"], "patch_qqnt_result.txt"), "w", encoding="utf-8").write("\n".join(lines))
-        sys.exit(0)
+        done(0)
 
     if issues:
         W("存在未知状态，中止。")
-        open(os.path.join(os.environ["TEMP"], "patch_qqnt_result.txt"), "w", encoding="utf-8").write("\n".join(lines))
-        sys.exit(1)
+        done(1)
 
     out = bytearray(data)
-    # F1
-    if not f1_done and f1_offs:
-        for off in f1_offs:
-            if out[off] == 0x87:
-                out[off] = 0x86
-        W("F1 已打 %d 处" % len(f1_offs))
-    elif not f1_done:
-        W("F1 跳过（搜索头不匹配，需人工检查版本）")
-    # F5 + 私聊
     for off, old, new, desc in PATCHES:
         out[off:off+len(new)] = new
         W("OK 0x%X %s" % (off, desc))
@@ -105,8 +117,7 @@ def main():
         W("写入完成。")
     except PermissionError:
         W("ERROR: 写入被拒绝（QQ 正在运行？先关闭 QQ 再执行）")
-        open(os.path.join(os.environ["TEMP"], "patch_qqnt_result.txt"), "w", encoding="utf-8").write("\n".join(lines))
-        sys.exit(1)
+        done(1)
 
     # 回读
     v = open(PATH, "rb").read()
@@ -115,11 +126,8 @@ def main():
         ok = v[off:off+len(new)] == new
         okall = okall and ok
         W("verify 0x%X [%s] %s" % (off, desc, "PASS" if ok else "FAIL"))
-    if not f1_done and f1_offs:
-        okall = okall and v.count(F1_HEAD_NEW) >= len(f1_offs)
     W("ALL_PASS=%s" % okall)
-    open(os.path.join(os.environ["TEMP"], "patch_qqnt_result.txt"), "w", encoding="utf-8").write("\n".join(lines))
-    sys.exit(0 if okall else 2)
+    done(0 if okall else 2)
 
 if __name__ == "__main__":
     main()
